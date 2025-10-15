@@ -1157,7 +1157,7 @@ corresponding to this item end of common part'/>
       <field name='tree' type='xmlNodePtr' info=' the sequence constructor if no eval
 string or the location'/>
       <field name='value' type='xmlXPathObjectPtr' info=' The value if computed'/>
-      <field name='fragment' type='xmlDocPtr' info=' The Result Tree Fragments (needed for XSLT 1.0)
+      <field name='fragment' type='xsltRVTListPtr' info=' The Result Tree Fragments (needed for XSLT 1.0)
 which are bound to the variable&apos;s lifetime.'/>
       <field name='level' type='int' info=' the depth in the tree;
 -1 if persistent (e.g. a given xsl:with-param)'/>
@@ -1537,8 +1537,8 @@ TODO: We need to get rid of this.
       <field name='sortfunc' type='xsltSortFunc' info='* handling of temporary Result Value Tree
 * (XSLT 1.0 term: &quot;Result Tree Fragment&quot;)
 *'/>
-      <field name='tmpRVT' type='xmlDocPtr' info=' list of RVT without persistance'/>
-      <field name='persistRVT' type='xmlDocPtr' info=' list of persistant RVTs'/>
+      <field name='tmpRVTList' type='xsltRVTListPtr' info=' list of RVT without persistance'/>
+      <field name='persistRVTList' type='xsltRVTListPtr' info=' list of persistant RVTs'/>
       <field name='ctxtflags' type='int' info='* Speed optimization when coalescing text nodes
 *'/>
       <field name='lasttext' type='const xmlChar *' info=' last text node content'/>
@@ -1560,7 +1560,7 @@ TODO: We need to get rid of this.
       <field name='initialContextDoc' type='xmlDocPtr' info=''/>
       <field name='cache' type='xsltTransformCachePtr' info=''/>
       <field name='contextVariable' type='void *' info=' the current variable item'/>
-      <field name='localRVT' type='xmlDocPtr' info=' list of local tree fragments; will be freed when
+      <field name='localRVTList' type='xsltRVTListPtr' info=' list of local tree fragments; will be freed when
 the instruction which created the fragment
 exits'/>
       <field name='localRVTBase' type='xmlDocPtr' info=' Obsolete'/>

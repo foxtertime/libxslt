@@ -427,6 +427,7 @@ LIBXML2_1.1.18 {
 # xsltPointerListFree; requires switch REFACTORED
   xsltRegisterLocalRVT;
   xsltReleaseRVT;
+  xsltReleaseRVTList;
 # xsltRestoreDocumentNamespaces; requires switch REFACTORED
 
 # extensions
