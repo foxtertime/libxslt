@@ -47,6 +47,21 @@ static const xmlChar *xsltComputingGlobalVarMarker =
 #define XSLT_VAR_IN_SELECT (1<<1)
 #define XSLT_TCTXT_VARIABLE(c) ((xsltStackElemPtr) (c)->contextVariable)
 
+static xsltRVTListPtr
+xsltRVTListCreate(void)
+{
+    xsltRVTListPtr ret;
+
+    ret = (xsltRVTListPtr) xmlMalloc(sizeof(xsltRVTList));
+    if (ret == NULL) {
+        xsltTransformError(NULL, NULL, NULL,
+            "xsltRVTListCreate: malloc failed\n");
+        return(NULL);
+    }
+    memset(ret, 0, sizeof(xsltRVTList));
+    return(ret);
+}
+
 /************************************************************************
  *									*
  *  Result Value Tree (Result Tree Fragment) interfaces			*
@@ -76,16 +91,16 @@ xsltCreateRVT(xsltTransformContextPtr ctxt)
     /*
     * Reuse a RTF from the cache if available.
     */
-    if (ctxt->cache->RVT) {
-	container = ctxt->cache->RVT;
-	ctxt->cache->RVT = (xmlDocPtr) container->next;
-	/* clear the internal pointers */
-	container->next = NULL;
-	container->prev = NULL;
-	if (ctxt->cache->nbRVT > 0)
-	    ctxt->cache->nbRVT--;
+    if (ctxt->cache->rvtList) {
+        xsltRVTListPtr rvtList = ctxt->cache->rvtList;
+
+        container = ctxt->cache->rvtList->RVT;
+        ctxt->cache->rvtList = rvtList->next;
+        xmlFree(rvtList);
+        if (ctxt->cache->nbRVT > 0)
+            ctxt->cache->nbRVT--;
 #ifdef XSLT_DEBUG_PROFILE_CACHE
-	ctxt->cache->dbgReusedRVTs++;
+        ctxt->cache->dbgReusedRVTs++;
 #endif
 	return(container);
     }
@@ -119,11 +134,17 @@ xsltCreateRVT(xsltTransformContextPtr ctxt)
 int
 xsltRegisterTmpRVT(xsltTransformContextPtr ctxt, xmlDocPtr RVT)
 {
-    if ((ctxt == NULL) || (RVT == NULL))
-	return(-1);
+    xsltRVTListPtr list;
 
-    RVT->prev = NULL;
+    if ((ctxt == NULL) || (RVT == NULL))
+        return(-1);
+
+    list = xsltRVTListCreate();
+    if (list == NULL)
+        return(-1);
+
     RVT->psvi = XSLT_RVT_LOCAL;
+    list->RVT = RVT;
 
     /*
     * We'll restrict the lifetime of user-created fragments
@@ -131,15 +152,13 @@ xsltRegisterTmpRVT(xsltTransformContextPtr ctxt, xmlDocPtr RVT)
     * var/param itself.
     */
     if (ctxt->contextVariable != NULL) {
-	RVT->next = (xmlNodePtr) XSLT_TCTXT_VARIABLE(ctxt)->fragment;
-	XSLT_TCTXT_VARIABLE(ctxt)->fragment = RVT;
-	return(0);
+        list->next = XSLT_TCTXT_VARIABLE(ctxt)->fragment;
+        XSLT_TCTXT_VARIABLE(ctxt)->fragment = list;
+        return(0);
     }
 
-    RVT->next = (xmlNodePtr) ctxt->tmpRVT;
-    if (ctxt->tmpRVT != NULL)
-	ctxt->tmpRVT->prev = (xmlNodePtr) RVT;
-    ctxt->tmpRVT = RVT;
+    list->next = ctxt->tmpRVTList;
+    ctxt->tmpRVTList = list;
     return(0);
 }
 
@@ -159,11 +178,14 @@ int
 xsltRegisterLocalRVT(xsltTransformContextPtr ctxt,
 		     xmlDocPtr RVT)
 {
+    xsltRVTListPtr list;
+
     if ((ctxt == NULL) || (RVT == NULL))
 	return(-1);
 
-    RVT->prev = NULL;
-    RVT->psvi = XSLT_RVT_LOCAL;
+    list = xsltRVTListCreate();
+    if (list == NULL)
+	return(-1);
 
     /*
     * When evaluating "select" expressions of xsl:variable
@@ -174,8 +196,10 @@ xsltRegisterLocalRVT(xsltTransformContextPtr ctxt,
     if ((ctxt->contextVariable != NULL) &&
 	(XSLT_TCTXT_VARIABLE(ctxt)->flags & XSLT_VAR_IN_SELECT))
     {
-	RVT->next = (xmlNodePtr) XSLT_TCTXT_VARIABLE(ctxt)->fragment;
-	XSLT_TCTXT_VARIABLE(ctxt)->fragment = RVT;
+        RVT->psvi = XSLT_RVT_LOCAL;
+        list->RVT = RVT;
+	list->next = XSLT_TCTXT_VARIABLE(ctxt)->fragment;
+	XSLT_TCTXT_VARIABLE(ctxt)->fragment = list;
 	return(0);
     }
     /*
@@ -183,10 +207,10 @@ xsltRegisterLocalRVT(xsltTransformContextPtr ctxt,
     * If not reference by a returning instruction (like EXSLT's function),
     * then this fragment will be freed, when the instruction exits.
     */
-    RVT->next = (xmlNodePtr) ctxt->localRVT;
-    if (ctxt->localRVT != NULL)
-	ctxt->localRVT->prev = (xmlNodePtr) RVT;
-    ctxt->localRVT = RVT;
+    RVT->psvi = XSLT_RVT_LOCAL;
+    list->RVT = RVT;
+    list->next = ctxt->localRVTList;
+    ctxt->localRVTList = list;
     return(0);
 }
 
@@ -348,60 +372,83 @@ xsltFlagRVTs(xsltTransformContextPtr ctxt, xmlXPathObjectPtr obj, void *val) {
 void
 xsltReleaseRVT(xsltTransformContextPtr ctxt, xmlDocPtr RVT)
 {
+    xsltRVTListPtr list;
+
     if (RVT == NULL)
-	return;
+        return;
+
+    list = xsltRVTListCreate();
+    if (list == NULL) {
+        if (RVT->_private != NULL) {
+            xsltFreeDocumentKeys((xsltDocumentPtr) RVT->_private);
+            xmlFree(RVT->_private);
+        }
+        xmlFreeDoc(RVT);
+        return;
+    }
+
+    list->RVT = RVT;
+    xsltReleaseRVTList(ctxt, list);
+}
+
+void
+xsltReleaseRVTList(xsltTransformContextPtr ctxt, xsltRVTListPtr list)
+{
+    if (list == NULL)
+        return;
 
     if (ctxt && (ctxt->cache->nbRVT < 40)) {
-	/*
-	* Store the Result Tree Fragment.
-	* Free the document info.
-	*/
-	if (RVT->_private != NULL) {
-	    xsltFreeDocumentKeys((xsltDocumentPtr) RVT->_private);
-	    xmlFree(RVT->_private);
-	    RVT->_private = NULL;
-	}
-	/*
-	* Clear the document tree.
-	* REVISIT TODO: Do we expect ID/IDREF tables to be existent?
-	*/
-	if (RVT->children != NULL) {
-	    xmlFreeNodeList(RVT->children);
-	    RVT->children = NULL;
-	    RVT->last = NULL;
-	}
-	if (RVT->ids != NULL) {
-	    xmlFreeIDTable((xmlIDTablePtr) RVT->ids);
-	    RVT->ids = NULL;
-	}
-	if (RVT->refs != NULL) {
-	    xmlFreeRefTable((xmlRefTablePtr) RVT->refs);
-	    RVT->refs = NULL;
-	}
+        /*
+        * Store the Result Tree Fragment.
+        * Free the document info.
+        */
+        if (list->RVT->_private != NULL) {
+            xsltFreeDocumentKeys((xsltDocumentPtr) list->RVT->_private);
+            xmlFree(list->RVT->_private);
+            list->RVT->_private = NULL;
+        }
+        /*
+        * Clear the document tree.
+        * REVISIT TODO: Do we expect ID/IDREF tables to be existent?
+        */
+        if (list->RVT->children != NULL) {
+            xmlFreeNodeList(list->RVT->children);
+            list->RVT->children = NULL;
+            list->RVT->last = NULL;
+        }
+        if (list->RVT->ids != NULL) {
+            xmlFreeIDTable((xmlIDTablePtr) list->RVT->ids);
+            list->RVT->ids = NULL;
+        }
+        if (list->RVT->refs != NULL) {
+            xmlFreeRefTable((xmlRefTablePtr) list->RVT->refs);
+            list->RVT->refs = NULL;
+        }
 
-	/*
-	* Reset the ownership information.
-	*/
-	RVT->psvi = NULL;
+        /*
+        * Reset the ownership information.
+        */
+        list->RVT->psvi = NULL;
 
-	RVT->next = (xmlNodePtr) ctxt->cache->RVT;
-	ctxt->cache->RVT = RVT;
+        list->next = ctxt->cache->rvtList;
+        ctxt->cache->rvtList = list;
 
-	ctxt->cache->nbRVT++;
+        ctxt->cache->nbRVT++;
 
 #ifdef XSLT_DEBUG_PROFILE_CACHE
-	ctxt->cache->dbgCachedRVTs++;
+        ctxt->cache->dbgCachedRVTs++;
 #endif
-	return;
+        return;
     }
     /*
     * Free it.
     */
-    if (RVT->_private != NULL) {
-	xsltFreeDocumentKeys((xsltDocumentPtr) RVT->_private);
-	xmlFree(RVT->_private);
+    if (list->RVT->_private != NULL) {
+        xsltFreeDocumentKeys((xsltDocumentPtr) list->RVT->_private);
+        xmlFree(list->RVT->_private);
     }
-    xmlFreeDoc(RVT);
+    xmlFreeDoc(list->RVT);
+    xmlFree(list);
 }
 
 /**
@@ -419,14 +466,18 @@ xsltReleaseRVT(xsltTransformContextPtr ctxt, xmlDocPtr RVT)
 int
 xsltRegisterPersistRVT(xsltTransformContextPtr ctxt, xmlDocPtr RVT)
 {
+    xsltRVTListPtr list;
+
     if ((ctxt == NULL) || (RVT == NULL)) return(-1);
 
+    list = xsltRVTListCreate();
+    if (list == NULL)
+        return(-1);
+
     RVT->psvi = XSLT_RVT_GLOBAL;
-    RVT->prev = NULL;
-    RVT->next = (xmlNodePtr) ctxt->persistRVT;
-    if (ctxt->persistRVT != NULL)
-	ctxt->persistRVT->prev = (xmlNodePtr) RVT;
-    ctxt->persistRVT = RVT;
+    list->RVT = RVT;
+    list->next = ctxt->persistRVTList;
+    ctxt->persistRVTList = list;
     return(0);
 }
 
@@ -441,52 +492,55 @@ xsltRegisterPersistRVT(xsltTransformContextPtr ctxt, xmlDocPtr RVT)
 void
 xsltFreeRVTs(xsltTransformContextPtr ctxt)
 {
-    xmlDocPtr cur, next;
+    xsltRVTListPtr cur, next;
 
     if (ctxt == NULL)
 	return;
     /*
     * Local fragments.
     */
-    cur = ctxt->localRVT;
+    cur = ctxt->localRVTList;
     while (cur != NULL) {
-        next = (xmlDocPtr) cur->next;
-	if (cur->_private != NULL) {
-	    xsltFreeDocumentKeys(cur->_private);
-	    xmlFree(cur->_private);
+        next = cur->next;
+	if (cur->RVT->_private != NULL) {
+	    xsltFreeDocumentKeys(cur->RVT->_private);
+	    xmlFree(cur->RVT->_private);
 	}
-	xmlFreeDoc(cur);
+	xmlFreeDoc(cur->RVT);
+	xmlFree(cur);
 	cur = next;
     }
-    ctxt->localRVT = NULL;
+    ctxt->localRVTList = NULL;
     /*
     * User-created per-template fragments.
     */
-    cur = ctxt->tmpRVT;
+    cur = ctxt->tmpRVTList;
     while (cur != NULL) {
-        next = (xmlDocPtr) cur->next;
-	if (cur->_private != NULL) {
-	    xsltFreeDocumentKeys(cur->_private);
-	    xmlFree(cur->_private);
+        next = cur->next;
+	if (cur->RVT->_private != NULL) {
+	    xsltFreeDocumentKeys(cur->RVT->_private);
+	    xmlFree(cur->RVT->_private);
 	}
-	xmlFreeDoc(cur);
+	xmlFreeDoc(cur->RVT);
+	xmlFree(cur);
 	cur = next;
     }
-    ctxt->tmpRVT = NULL;
+    ctxt->tmpRVTList = NULL;
     /*
     * Global fragments.
     */
-    cur = ctxt->persistRVT;
+    cur = ctxt->persistRVTList;
     while (cur != NULL) {
-        next = (xmlDocPtr) cur->next;
-	if (cur->_private != NULL) {
-	    xsltFreeDocumentKeys(cur->_private);
-	    xmlFree(cur->_private);
+        next = cur->next;
+	if (cur->RVT->_private != NULL) {
+	    xsltFreeDocumentKeys(cur->RVT->_private);
+	    xmlFree(cur->RVT->_private);
 	}
-	xmlFreeDoc(cur);
+	xmlFreeDoc(cur->RVT);
+	xmlFree(cur);
 	cur = next;
     }
-    ctxt->persistRVT = NULL;
+    ctxt->persistRVTList = NULL;
 }
 
 /************************************************************************
@@ -574,21 +628,23 @@ xsltFreeStackElem(xsltStackElemPtr elem) {
     * Release the list of temporary Result Tree Fragments.
     */
     if (elem->context) {
-	xmlDocPtr cur;
+	xsltRVTListPtr cur;
 
 	while (elem->fragment != NULL) {
 	    cur = elem->fragment;
-	    elem->fragment = (xmlDocPtr) cur->next;
+	    elem->fragment = cur->next;
 
-            if (cur->psvi == XSLT_RVT_LOCAL) {
-		xsltReleaseRVT(elem->context, cur);
-            } else if (cur->psvi == XSLT_RVT_FUNC_RESULT) {
-                xsltRegisterLocalRVT(elem->context, cur);
-                cur->psvi = XSLT_RVT_FUNC_RESULT;
+            if (cur->RVT->psvi == XSLT_RVT_LOCAL) {
+		xsltReleaseRVTList(elem->context, cur);
+            } else if (cur->RVT->psvi == XSLT_RVT_FUNC_RESULT) {
+                xsltRegisterLocalRVT(elem->context, cur->RVT);
+                cur->RVT->psvi = XSLT_RVT_FUNC_RESULT;
+                xmlFree(cur);
             } else {
                 xmlGenericError(xmlGenericErrorContext,
                         "xsltFreeStackElem: Unexpected RVT flag %p\n",
-                        cur->psvi);
+                        cur->RVT->psvi);
+                xmlFree(cur);
             }
 	}
     }
@@ -966,6 +1022,7 @@ xsltEvalVariable(xsltTransformContextPtr ctxt, xsltStackElemPtr variable,
 	} else {
 	    if (variable->tree) {
 		xmlDocPtr container;
+		xsltRVTListPtr rvtList;
 		xmlNodePtr oldInsert;
 		xmlDocPtr  oldOutput;
 		xsltStackElemPtr oldVar = ctxt->contextVariable;
@@ -976,6 +1033,11 @@ xsltEvalVariable(xsltTransformContextPtr ctxt, xsltStackElemPtr variable,
 		container = xsltCreateRVT(ctxt);
 		if (container == NULL)
 		    goto error;
+		rvtList = xsltRVTListCreate();
+		if (rvtList == NULL) {
+		    xmlFreeDoc(container);
+		    goto error;
+		}
 		/*
 		* NOTE: Local Result Tree Fragments of params/variables
 		* are not registered globally anymore; the life-time
@@ -988,7 +1050,8 @@ xsltEvalVariable(xsltTransformContextPtr ctxt, xsltStackElemPtr variable,
 		* when the variable is freed, it will also free
 		* the Result Tree Fragment.
 		*/
-		variable->fragment = container;
+                rvtList->RVT = container;
+                variable->fragment = rvtList;
                 container->psvi = XSLT_RVT_LOCAL;
 
 		oldOutput = ctxt->output;

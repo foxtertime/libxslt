@@ -339,7 +339,7 @@ void	<a href="#xsltTransformFunction">xsltTransformFunction</a>		(<a href="libxs
     const xmlChar *	select	: the eval string
     xmlNodePtr	tree	: the sequence constructor if no eval str
     xmlXPathObjectPtr	value	: The value if computed
-    xmlDocPtr	fragment	: The Result Tree Fragments (needed for X
+    xsltRVTListPtr	fragment	: The Result Tree Fragments (needed for X
     int	level	: the depth in the tree; -1 if persistent
     <a href="libxslt-xsltInternals.html#xsltTransformContextPtr">xsltTransformContextPtr</a>	context	: The transformation context; needed to c
     int	flags
@@ -636,8 +636,8 @@ The content of this structure is not made public by the API.
     xmlGenericErrorFunc	error	: a specific error handler
     void *	errctx	: context for the error handler
     <a href="libxslt-xsltInternals.html#xsltSortFunc">xsltSortFunc</a>	sortfunc	: * handling of temporary Result Value Tre
-    xmlDocPtr	tmpRVT	: list of RVT without persistance
-    xmlDocPtr	persistRVT	: list of persistant RVTs
+    xsltRVTListPtr	tmpRVTList	: list of RVT without persistance
+    xsltRVTListPtr	persistRVTList : list of persistant RVTs
     int	ctxtflags	: * Speed optimization when coalescing tex
     const xmlChar *	lasttext	: last text node content
     int	lasttsize	: last text node size
@@ -655,7 +655,7 @@ The content of this structure is not made public by the API.
     xmlDocPtr	initialContextDoc
     <a href="libxslt-xsltInternals.html#xsltTransformCachePtr">xsltTransformCachePtr</a>	cache
     void *	contextVariable	: the current variable item
-    xmlDocPtr	localRVT	: list of local tree fragments; will be f
+    xsltRVTListPtr	localRVTList    : list of local tree fragments; will be f
     xmlDocPtr	localRVTBase	: Obsolete
     int	keyInitLevel	: Needed to catch recursive keys issues
     int	depth	: Needed to catch recursions
